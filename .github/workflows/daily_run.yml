@@ -26,7 +26,8 @@ jobs:
           DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
         run: python market_report.py
 
-      - name: Upload Excel Artifact (Backup Download)
+      - name: Upload Report Artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: Daily-Market-Report
