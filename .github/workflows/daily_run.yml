@@ -2,7 +2,6 @@ name: Daily Market Top 10 Report
 
 on:
   schedule:
-    # Runs everyday at 12:30 UTC (6:00 PM IST) Monday to Friday
     - cron: '30 12 * * 1-5'
   workflow_dispatch:
 
@@ -26,3 +25,9 @@ jobs:
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
           DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
         run: python market_report.py
+
+      - name: Upload Excel Artifact (Backup Download)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Daily-Market-Report
+          path: "*.xlsx"
