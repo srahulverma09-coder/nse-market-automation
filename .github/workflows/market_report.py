@@ -1,10 +1,11 @@
 import os
 import json
+import time
 import pandas as pd
 import yfinance as yf
 from datetime import datetime
 
-# 1. Complete FNO List (~180 Stocks)
+# Complete FNO List (~180 Stocks)
 FNO_STOCKS = [
     "AARTIIND.NS","ABB.NS","ABBOTINDIA.NS","ABCAPITAL.NS","ABFRL.NS","ACC.NS","ADANIENT.NS","ADANIPORTS.NS","ALKEM.NS","AMBUJACEM.NS",
     "APOLLOHOSP.NS","APOLLOTYRE.NS","ASHOKLEY.NS","ASIANPAINT.NS","ASTRAL.NS","ATUL.NS","AUBANK.NS","AUROPHARMA.NS","AXISBANK.NS","BAJAJ-AUTO.NS",
@@ -28,43 +29,51 @@ FNO_STOCKS = [
 def get_nse_all_symbols():
     url = "https://archives.nseindia.com/content/equities/EQUITY_L.csv"
     try:
+        headers = {'User-Agent': 'Mozilla/5.0'}
         df = pd.read_csv(url)
         symbols = [str(sym).strip() + ".NS" for sym in df['SYMBOL'].dropna().tolist()]
         if len(symbols) > 100:
             return symbols
     except Exception as e:
-        print("NSE official CSV fetch error, falling back to FNO list:", e)
+        print("NSE CSV fetch error, using fallback list:", e)
     return FNO_STOCKS
 
-def fetch_data_and_calculate(symbols):
-    print(f"Fetching data for {len(symbols)} tickers...")
-    try:
-        data = yf.download(symbols, period="3mo", interval="1d", group_by='ticker', threads=True)
-    except Exception as e:
-        print("Batch download error:", e)
-        return pd.DataFrame()
-
+def fetch_data_in_batches(symbols, batch_size=50):
     results = []
-    for sym in symbols:
-        try:
-            df = data[sym] if len(symbols) > 1 else data
-            close = df['Close'].dropna()
-            if len(close) >= 5:
-                curr = close.iloc[-1]
-                d1 = close.iloc[-2] if len(close) >= 2 else curr
-                w1 = close.iloc[-6] if len(close) >= 6 else close.iloc[0]
-                m1 = close.iloc[-22] if len(close) >= 22 else close.iloc[0]
-                m3 = close.iloc[0]
+    total = len(symbols)
+    print(f"Total tickers to process: {total}")
 
-                results.append({
-                    'Stock Name': sym.replace('.NS', ''),
-                    'chg1D': round(((curr - d1) / d1) * 100, 2),
-                    'chg1W': round(((curr - w1) / w1) * 100, 2),
-                    'chg1M': round(((curr - m1) / m1) * 100, 2),
-                    'chg3M': round(((curr - m3) / m3) * 100, 2)
-                })
-        except Exception:
-            continue
+    for i in range(0, total, batch_size):
+        chunk = symbols[i:i + batch_size]
+        print(f"Fetching batch {i//batch_size + 1} of {(total // batch_size) + 1}...")
+        
+        try:
+            data = yf.download(chunk, period="3mo", interval="1d", group_by='ticker', threads=True, progress=False)
+            for sym in chunk:
+                try:
+                    df = data[sym] if len(chunk) > 1 else data
+                    if 'Close' in df and not df['Close'].dropna().empty:
+                        close = df['Close'].dropna()
+                        if len(close) >= 5:
+                            curr = float(close.iloc[-1])
+                            d1 = float(close.iloc[-2]) if len(close) >= 2 else curr
+                            w1 = float(close.iloc[-6]) if len(close) >= 6 else float(close.iloc[0])
+                            m1 = float(close.iloc[-22]) if len(close) >= 22 else float(close.iloc[0])
+                            m3 = float(close.iloc[0])
+
+                            results.append({
+                                'Stock Name': sym.replace('.NS', ''),
+                                'chg1D': round(((curr - d1) / d1) * 100, 2),
+                                'chg1W': round(((curr - w1) / w1) * 100, 2),
+                                'chg1M': round(((curr - m1) / m1) * 100, 2),
+                                'chg3M': round(((curr - m3) / m3) * 100, 2)
+                            })
+                except Exception:
+                    continue
+        except Exception as e:
+            print(f"Batch fetch error for {i}:", e)
+        time.sleep(0.5)
+
     return pd.DataFrame(results)
 
 def build_side_by_side_df(df_res):
@@ -81,31 +90,26 @@ def build_side_by_side_df(df_res):
     t1m.columns = ['1M Stock', '1M %Chng']
     t3m.columns = ['3M Stock', '3M %Chng']
 
-    # Formatting % values
     for col in ['1D %Chng', '1W %Chng', '1M %Chng', '3M %Chng']:
         if col in t1d: t1d[col] = t1d[col].apply(lambda x: f"+{x}%" if x >= 0 else f"{x}%")
         if col in t1w: t1w[col] = t1w[col].apply(lambda x: f"+{x}%" if x >= 0 else f"{x}%")
         if col in t1m: t1m[col] = t1m[col].apply(lambda x: f"+{x}%" if x >= 0 else f"{x}%")
         if col in t3m: t3m[col] = t3m[col].apply(lambda x: f"+{x}%" if x >= 0 else f"{x}%")
 
-    combined = pd.concat([
-        t1d[['1D Stock', '1D %Chng']],
-        t1w[['1W Stock', '1W %Chng']],
-        t1m[['1M Stock', '1M %Chng']],
-        t3m[['3M Stock', '3M %Chng']]
-    ], axis=1)
-
+    combined = pd.concat([t1d, t1w, t1m, t3m], axis=1)
     return combined
 
 def main():
-    # 1. Process FNO
-    fno_df_raw = fetch_data_and_calculate(FNO_STOCKS)
-    fno_side = build_side_by_side_df(fno_df_raw)
+    print("--- Starting Market Report Generation ---")
+    
+    # 1. FNO Stocks
+    fno_raw = fetch_data_in_batches(FNO_STOCKS, batch_size=40)
+    fno_side = build_side_by_side_df(fno_raw)
 
-    # 2. Process All NSE Stocks
-    all_nse_symbols = get_nse_all_symbols()
-    nse_df_raw = fetch_data_and_calculate(all_nse_symbols)
-    nse_side = build_side_by_side_df(nse_df_raw)
+    # 2. Total NSE Stocks
+    nse_symbols = get_nse_all_symbols()
+    nse_raw = fetch_data_in_batches(nse_symbols, batch_size=50)
+    nse_side = build_side_by_side_df(nse_raw)
 
     file_name = f"NSE_Market_Top10_{datetime.now().strftime('%Y-%m-%d')}.xlsx"
 
@@ -115,9 +119,9 @@ def main():
         if not nse_side.empty:
             nse_side.to_excel(writer, sheet_name='NSE_Total_Market', index=False)
 
-    print("Excel File Generated Successfully:", file_name)
+    print(f"SUCCESS: Excel File Generated -> {file_name}")
 
-    # Drive Upload Logic (Safe Check)
+    # Drive Upload
     creds_json = os.environ.get('GCP_SA_KEY')
     folder_id = os.environ.get('DRIVE_FOLDER_ID')
 
@@ -131,17 +135,14 @@ def main():
             creds = Credentials.from_service_account_info(info, scopes=['https://www.googleapis.com/auth/drive'])
             service = build('drive', 'v3', credentials=creds)
 
-            file_metadata = {
-                'name': file_name,
-                'parents': [folder_id]
-            }
+            file_metadata = {'name': file_name, 'parents': [folder_id]}
             media = MediaFileUpload(file_name, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
             file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-            print('Uploaded to Google Drive! File ID:', file.get('id'))
+            print('Uploaded to Drive! File ID:', file.get('id'))
         except Exception as e:
-            print("Drive Upload Error (Bypassed):", e)
+            print("Drive Upload Warning (File saved locally):", e)
     else:
-        print("Missing Secrets. Skipped Drive Upload.")
+        print("Drive Secrets not set properly. File generated locally.")
 
 if __name__ == "__main__":
     main()
