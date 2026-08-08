@@ -18,16 +18,13 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          pip install pandas yfinance openpyxl google-api-python-client google-auth requests
+          python -m pip install --upgrade pip
+          pip install pandas yfinance openpyxl requests
 
       - name: Run Market Report Script
-        env:
-          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
-          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
         run: python market_report.py
 
       - name: Upload Report Artifact
-        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: Daily-Market-Report
