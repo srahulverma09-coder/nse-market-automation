@@ -3,9 +3,6 @@ import json
 import pandas as pd
 import yfinance as yf
 from datetime import datetime
-from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
 
 # 1. Complete FNO List (~180 Stocks)
 FNO_STOCKS = [
@@ -84,9 +81,12 @@ def build_side_by_side_df(df_res):
     t1m.columns = ['1M Stock', '1M %Chng']
     t3m.columns = ['3M Stock', '3M %Chng']
 
-    # Formatted % String
+    # Formatting % values
     for col in ['1D %Chng', '1W %Chng', '1M %Chng', '3M %Chng']:
-        t1d[col] = t1d['1D %Chng'].apply(lambda x: f"+{x}%" if x >= 0 else f"{x}%") if col in t1d else None
+        if col in t1d: t1d[col] = t1d[col].apply(lambda x: f"+{x}%" if x >= 0 else f"{x}%")
+        if col in t1w: t1w[col] = t1w[col].apply(lambda x: f"+{x}%" if x >= 0 else f"{x}%")
+        if col in t1m: t1m[col] = t1m[col].apply(lambda x: f"+{x}%" if x >= 0 else f"{x}%")
+        if col in t3m: t3m[col] = t3m[col].apply(lambda x: f"+{x}%" if x >= 0 else f"{x}%")
 
     combined = pd.concat([
         t1d[['1D Stock', '1D %Chng']],
@@ -115,14 +115,18 @@ def main():
         if not nse_side.empty:
             nse_side.to_excel(writer, sheet_name='NSE_Total_Market', index=False)
 
-    print("Excel File Generated Successfully!")
+    print("Excel File Generated Successfully:", file_name)
 
-    # Google Drive Upload
+    # Drive Upload Logic (Safe Check)
     creds_json = os.environ.get('GCP_SA_KEY')
     folder_id = os.environ.get('DRIVE_FOLDER_ID')
 
     if creds_json and folder_id:
         try:
+            from google.oauth2.service_account import Credentials
+            from googleapiclient.discovery import build
+            from googleapiclient.http import MediaFileUpload
+
             info = json.loads(creds_json)
             creds = Credentials.from_service_account_info(info, scopes=['https://www.googleapis.com/auth/drive'])
             service = build('drive', 'v3', credentials=creds)
@@ -135,9 +139,11 @@ def main():
             file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
             print('Uploaded to Google Drive! File ID:', file.get('id'))
         except Exception as e:
-            print("Drive Upload Error:", e)
+            print("Drive Upload Error (Bypassed):", e)
     else:
-        print("GCP_SA_KEY or DRIVE_FOLDER_ID environment variables missing!")
+        print("Missing Secrets. Skipped Drive Upload.")
 
 if __name__ == "__main__":
     main()
+
+
