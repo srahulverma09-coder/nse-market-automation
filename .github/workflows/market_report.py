@@ -1,11 +1,11 @@
 import os
-import sys
+import json
 import time
 import pandas as pd
 import yfinance as yf
 from datetime import datetime
 
-# Complete FNO Stocks (~180 Tickers)
+# Complete FNO & Major NSE Watchlist Fallback
 FNO_STOCKS = [
     "AARTIIND.NS","ABB.NS","ABBOTINDIA.NS","ABCAPITAL.NS","ABFRL.NS","ACC.NS","ADANIENT.NS","ADANIPORTS.NS","ALKEM.NS","AMBUJACEM.NS",
     "APOLLOHOSP.NS","APOLLOTYRE.NS","ASHOKLEY.NS","ASIANPAINT.NS","ASTRAL.NS","ATUL.NS","AUBANK.NS","AUROPHARMA.NS","AXISBANK.NS","BAJAJ-AUTO.NS",
@@ -26,41 +26,43 @@ FNO_STOCKS = [
     "TECHM.NS","TITAN.NS","TORNTPHARM.NS","TRENT.NS","TVSMOTOR.NS","UBL.NS","ULTRACEMCO.NS","UPL.NS","VEDL.NS","VOLTAS.NS","WIPRO.NS","ZEEL.NS"
 ]
 
-def fetch_data(symbols):
-    print(f"Total symbols: {len(symbols)}")
+def fetch_stock_metrics(symbols):
+    print(f"Fetching data for {len(symbols)} stocks...")
     results = []
-    # Download data in chunks
-    chunk_size = 30
+    chunk_size = 25
+    
     for i in range(0, len(symbols), chunk_size):
-        chunk = symbols[i:i+chunk_size]
+        chunk = symbols[i:i + chunk_size]
         try:
             data = yf.download(chunk, period="3mo", interval="1d", group_by='ticker', threads=True, progress=False)
             for sym in chunk:
                 try:
                     df = data[sym] if len(chunk) > 1 else data
-                    close = df['Close'].dropna()
-                    if len(close) >= 5:
-                        curr = float(close.iloc[-1])
-                        d1 = float(close.iloc[-2]) if len(close) >= 2 else curr
-                        w1 = float(close.iloc[-6]) if len(close) >= 6 else float(close.iloc[0])
-                        m1 = float(close.iloc[-22]) if len(close) >= 22 else float(close.iloc[0])
-                        m3 = float(close.iloc[0])
+                    if 'Close' in df and not df['Close'].dropna().empty:
+                        close = df['Close'].dropna()
+                        if len(close) >= 5:
+                            curr = float(close.iloc[-1])
+                            d1 = float(close.iloc[-2]) if len(close) >= 2 else curr
+                            w1 = float(close.iloc[-6]) if len(close) >= 6 else float(close.iloc[0])
+                            m1 = float(close.iloc[-22]) if len(close) >= 22 else float(close.iloc[0])
+                            m3 = float(close.iloc[0])
 
-                        results.append({
-                            'Stock Name': sym.replace('.NS', ''),
-                            'chg1D': round(((curr - d1) / d1) * 100, 2),
-                            'chg1W': round(((curr - w1) / w1) * 100, 2),
-                            'chg1M': round(((curr - m1) / m1) * 100, 2),
-                            'chg3M': round(((curr - m3) / m3) * 100, 2)
-                        })
+                            results.append({
+                                'Stock Name': sym.replace('.NS', ''),
+                                'chg1D': round(((curr - d1) / d1) * 100, 2),
+                                'chg1W': round(((curr - w1) / w1) * 100, 2),
+                                'chg1M': round(((curr - m1) / m1) * 100, 2),
+                                'chg3M': round(((curr - m3) / m3) * 100, 2)
+                            })
                 except Exception:
                     continue
         except Exception as e:
-            print(f"Error fetching chunk {i}: {e}")
-        time.sleep(0.2)
+            print(f"Batch fetch error at index {i}: {e}")
+        time.sleep(0.1)
+        
     return pd.DataFrame(results)
 
-def build_side_by_side(df_res):
+def format_side_by_side(df_res):
     if df_res.empty:
         return pd.DataFrame()
 
@@ -83,19 +85,21 @@ def build_side_by_side(df_res):
     return pd.concat([t1d, t1w, t1m, t3m], axis=1)
 
 def main():
-    print("Starting data fetch...")
-    fno_raw = fetch_data(FNO_STOCKS)
-    fno_side = build_side_by_side(fno_raw)
+    print("Starting processing...")
+    fno_raw = fetch_stock_metrics(FNO_STOCKS)
+    fno_formatted = format_side_by_side(fno_raw)
 
     file_name = f"NSE_Market_Top10_{datetime.now().strftime('%Y-%m-%d')}.xlsx"
 
     with pd.ExcelWriter(file_name, engine='openpyxl') as writer:
-        if not fno_side.empty:
-            fno_side.to_excel(writer, sheet_name='FNO_Top_Gainers', index=False)
+        if not fno_formatted.empty:
+            fno_formatted.to_excel(writer, sheet_name='FNO_Top_Gainers', index=False)
         else:
-            pd.DataFrame({'Message': ['No Data']}).to_excel(writer, sheet_name='FNO_Top_Gainers', index=False)
+            pd.DataFrame({'Message': ['Data processing failed']}).to_excel(writer, sheet_name='FNO_Top_Gainers', index=False)
 
     print(f"File created successfully: {file_name}")
 
 if __name__ == "__main__":
     main()
+
+
